@@ -1,5 +1,4 @@
-// Package memory provides an in-memory, concurrency-safe link store.
-// It satisfies shortener.Store; data is lost when the process exits.
+// Package memory provides an in-memory link store backed by maps + sync.RWMutex.
 package memory
 
 import (
@@ -10,20 +9,13 @@ import (
 	"github.com/AmHonored/url-shortener/internal/shortener"
 )
 
-// Store keeps links in two maps guarded by one RWMutex:
-//
-//	byCode: code → Link        (redirect / lookup path)
-//	byURL:  normalized URL → code  (idempotency index: same URL → same code)
-//
-// Reads (Get) take the shared lock so redirects run in parallel; Create takes
-// the exclusive lock because it must check and insert atomically.
+// Store keeps byCode and byURL maps guarded by one RWMutex.
 type Store struct {
 	mu     sync.RWMutex
 	byCode map[string]shortener.Link
 	byURL  map[string]string
 }
 
-// New returns an empty Store.
 func New() *Store {
 	return &Store{
 		byCode: make(map[string]shortener.Link),
@@ -31,13 +23,8 @@ func New() *Store {
 	}
 }
 
-// Create saves link and returns the stored link.
-//   - If link.URL is already stored, the existing link is returned unchanged
-//     (idempotent: the new code is discarded).
-//   - If link.Code is used by a different URL, it returns shortener.ErrCodeExists.
-//
-// Both checks and the insert happen under one write lock, so concurrent calls
-// for the same URL can never end up with two different codes.
+// Create saves link. Same URL returns the existing link; same code with
+// a different URL returns ErrCodeExists.
 func (s *Store) Create(_ context.Context, link shortener.Link) (shortener.Link, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -53,7 +40,7 @@ func (s *Store) Create(_ context.Context, link shortener.Link) (shortener.Link, 
 	return link, nil
 }
 
-// Get returns the link for code, or an error wrapping shortener.ErrNotFound.
+// Get returns the link for code, or ErrNotFound.
 func (s *Store) Get(_ context.Context, code string) (shortener.Link, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

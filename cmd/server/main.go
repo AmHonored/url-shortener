@@ -1,6 +1,3 @@
-// Command server runs the URL shortener HTTP service.
-//
-//	go run ./cmd/server -addr :8080 -base http://localhost:8080
 package main
 
 import (
@@ -16,16 +13,14 @@ import (
 
 func main() {
 	addr := flag.String("addr", ":8080", "HTTP listen address")
-	base := flag.String("base", "http://localhost:8080", "public base URL used to build short_url")
+	base := flag.String("base", "http://localhost:8080", "public base URL for short_url")
 	flag.Parse()
 
 	if u, err := url.Parse(*base); err != nil || u.Scheme == "" || u.Host == "" {
-		log.Fatalf("invalid -base %q: want an absolute URL like http://localhost:8080", *base)
+		log.Fatalf("invalid -base %q", *base)
 	}
 
 	svc := shortener.NewService(memory.New())
-	handler := httpapi.New(svc, *base)
-
 	log.Printf("listening on %s (base %s)", *addr, *base)
-	log.Fatal(http.ListenAndServe(*addr, handler))
+	log.Fatal(http.ListenAndServe(*addr, httpapi.New(svc, *base)))
 }

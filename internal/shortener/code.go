@@ -6,28 +6,20 @@ import (
 )
 
 const (
-	// CodePrefix tags every generated code ("sg" = sysgrp).
-	CodePrefix = "sg"
-	// codeRandomLen is the number of random characters after the prefix.
-	// 62^6 ≈ 56.8 billion possible codes.
+	CodePrefix    = "sg"
 	codeRandomLen = 6
-	// CodeLen is the total length of a generated code (8, within the 6–8 rule).
-	CodeLen = len(CodePrefix) + codeRandomLen
+	CodeLen       = len(CodePrefix) + codeRandomLen
 
-	base62 = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
-	// unbiasedLimit is the largest multiple of 62 that fits in a byte (248).
-	// Random bytes >= it are skipped so that byte % 62 is uniform.
-	unbiasedLimit = 256 / len(base62) * len(base62)
+	base62        = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	unbiasedLimit = 256 / len(base62) * len(base62) // 248; skip bytes >= this for uniform distribution
 )
 
-// NewCode returns a new random short code: CodePrefix followed by
-// codeRandomLen base62 characters from crypto/rand, e.g. "sgaB3dE9".
-// Codes are unpredictable, so links cannot be enumerated.
+// NewCode returns a random short code like "sgaB3dE9".
 func NewCode() (string, error) {
 	code := make([]byte, 0, CodeLen)
 	code = append(code, CodePrefix...)
 
-	var buf [codeRandomLen * 2]byte // extra bytes so one read usually suffices
+	var buf [codeRandomLen * 2]byte
 	for len(code) < CodeLen {
 		if _, err := rand.Read(buf[:]); err != nil {
 			return "", fmt.Errorf("generate code: %w", err)
