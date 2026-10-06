@@ -32,11 +32,11 @@
 
 | Done | Pts | Requirement |
 |:----:|:---:|-------------|
-| [ ] | 5 | Server timeouts configured |
-| [ ] | 5 | `Mutex` vs `RWMutex` matches behavior and `DECISIONS.md` |
-| [ ] | 5 | Benchmarks for shorten and redirect |
-| [ ] | 5 | README: benchmark line + profiling insight |
-| [ ] | 5 | Tests and `-race` still green |
+| [x] | 5 | Server timeouts configured |
+| [x] | 5 | `Mutex` vs `RWMutex` matches behavior and `DECISIONS.md` |
+| [x] | 5 | Benchmarks for shorten and redirect |
+| [x] | 5 | README: benchmark line + profiling insight |
+| [x] | 5 | Tests and `-race` still green |
 
 ## Part 4 — Persistence (25 points)
 

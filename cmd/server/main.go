@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"time"
 
 	"github.com/AmHonored/url-shortener/internal/httpapi"
 	"github.com/AmHonored/url-shortener/internal/shortener"
@@ -21,6 +22,15 @@ func main() {
 	}
 
 	svc := shortener.NewService(memory.New())
+
+	srv := &http.Server{
+		Addr:         *addr,
+		Handler:      httpapi.New(svc, *base),
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+
 	log.Printf("listening on %s (base %s)", *addr, *base)
-	log.Fatal(http.ListenAndServe(*addr, httpapi.New(svc, *base)))
+	log.Fatal(srv.ListenAndServe())
 }

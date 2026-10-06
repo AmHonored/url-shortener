@@ -49,3 +49,15 @@ Go 1.22 `ServeMux` patterns. Request bodies capped at 1 MB. `-base` flag validat
 
 ### Store interface
 Defined in the domain package (`shortener.Store`) so storage depends on the domain, not the other way around. Tests use a `fakeStore` to verify service logic in isolation.
+
+## Part 3
+
+### Server timeouts
+`http.Server` has `ReadTimeout` (5 s), `WriteTimeout` (10 s), and `IdleTimeout` (120 s) to prevent slow-client DoS. Bare `http.ListenAndServe` has none.
+
+### Mutex choice
+`sync.RWMutex` — redirects (`Get`) are the hot path and only need `RLock`, so they run in parallel. `Create` needs exclusive `Lock` for the atomic check-and-insert. A plain `Mutex` would serialize all reads unnecessarily.
+
+### Benchmarks
+`benchmark_test.go` covers idempotent shorten, distinct-URL shorten, redirect, and metadata lookup via `httptest`. These are end-to-end through the router so they measure realistic handler cost.
+
