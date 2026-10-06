@@ -22,6 +22,11 @@ type shortenResponse struct {
 	ShortURL string `json:"short_url"`
 }
 
+type linkResponse struct {
+	URL       string `json:"url"`
+	CreatedAt string `json:"created_at"`
+}
+
 type errorResponse struct {
 	Error string `json:"error"`
 }
@@ -37,6 +42,7 @@ func New(svc *shortener.Service, baseURL string) http.Handler {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/shorten", h.shorten)
+	mux.HandleFunc("GET /api/v1/links/{code}", h.lookup)
 	mux.HandleFunc("GET /{code}", h.redirect)
 	return mux
 }
@@ -58,6 +64,18 @@ func (h *handler) shorten(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, shortenResponse{
 		Code:     link.Code,
 		ShortURL: h.baseURL + "/" + link.Code,
+	})
+}
+
+func (h *handler) lookup(w http.ResponseWriter, r *http.Request) {
+	link, err := h.svc.Resolve(r.Context(), r.PathValue("code"))
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, linkResponse{
+		URL:       link.URL,
+		CreatedAt: link.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 	})
 }
 

@@ -23,10 +23,11 @@ go run ./cmd/server -addr :8080 -base http://localhost:8080
 
 ## API
 
-| Method | Path           | Success                                    | Errors |
-|--------|----------------|--------------------------------------------|--------|
-| POST   | `/api/shorten` | **201** `{"code":"…","short_url":"…"}`     | **400** bad JSON / missing / empty / non-http(s) URL |
-| GET    | `/{code}`      | **302** with `Location: <long url>`        | **404** unknown code |
+| Method | Path                   | Success                                    | Errors |
+|--------|------------------------|--------------------------------------------|--------|
+| POST   | `/api/shorten`         | **201** `{"code":"…","short_url":"…"}`     | **400** bad JSON / missing / invalid URL |
+| GET    | `/api/v1/links/{code}` | **200** `{"url":"…","created_at":"…"}`     | **404** unknown code |
+| GET    | `/{code}`              | **302** with `Location: <long url>`        | **404** unknown code |
 
 Errors have a JSON body: `{"error":"…"}`.
 

@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// fakeStore is a minimal map-based Store used to test the service in
-// isolation. Setting err makes every Create fail with it.
 type fakeStore struct {
 	byCode  map[string]Link
 	byURL   map[string]string
@@ -42,7 +40,6 @@ func (f *fakeStore) Get(_ context.Context, code string) (Link, error) {
 	return l, nil
 }
 
-// codes returns a generator that yields the given codes in order.
 func codes(list ...string) func() (string, error) {
 	i := 0
 	return func() (string, error) {
@@ -60,7 +57,6 @@ func TestShortenIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Shorten: %v", err)
 	}
-	// Equivalent spelling must map to the same code.
 	second, err := svc.Shorten(ctx, "HTTPS://GO.DEV:443/doc/#intro")
 	if err != nil {
 		t.Fatalf("Shorten: %v", err)

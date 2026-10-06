@@ -21,12 +21,12 @@
 
 | Done | Pts | Requirement |
 |:----:|:---:|-------------|
-| [ ] | 5 | Metadata route **200** / **404** with correct JSON |
-| [ ] | 4 | `ErrNotFound`, `ErrInvalidURL` from store/domain |
-| [ ] | 4 | `%w` + `errors.Is` in HTTP mapping |
-| [ ] | 5 | `Store` interface + fake used in tests |
-| [ ] | 4 | Tests for metadata route and error mapping |
-| [ ] | 3 | Test or note in README: idempotency still works via `Store` / HTTP after Part 2 changes |
+| [x] | 5 | Metadata route **200** / **404** with correct JSON |
+| [x] | 4 | `ErrNotFound`, `ErrInvalidURL` from store/domain |
+| [x] | 4 | `%w` + `errors.Is` in HTTP mapping |
+| [x] | 5 | `Store` interface + fake used in tests |
+| [x] | 4 | Tests for metadata route and error mapping |
+| [x] | 3 | Test or note in README: idempotency still works via `Store` / HTTP after Part 2 changes |
 
 ## Part 3 — Performance & measurement (25 points)
 

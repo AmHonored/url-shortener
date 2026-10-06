@@ -72,8 +72,6 @@ func TestGetUnknown(t *testing.T) {
 	}
 }
 
-// TestConcurrentCreateSameURL races many writers on one URL; all must agree on
-// the first stored code. Run with -race to also check the locking.
 func TestConcurrentCreateSameURL(t *testing.T) {
 	s := New()
 	ctx := context.Background()

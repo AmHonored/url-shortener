@@ -21,7 +21,6 @@ func newTestHandler() http.Handler {
 	return New(shortener.NewService(memory.New()), testBase)
 }
 
-// post sends POST /api/shorten with the given raw body.
 func post(t *testing.T, h http.Handler, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
@@ -37,8 +36,6 @@ func get(h http.Handler, path string) *httptest.ResponseRecorder {
 	return rec
 }
 
-// doShorten posts url and returns the decoded 201 response. It does not use
-// *testing.T so it is safe to call from goroutines.
 func doShorten(h http.Handler, url string) (shortenResponse, error) {
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(fmt.Sprintf(`{"url":%q}`, url)))
 	rec := httptest.NewRecorder()
@@ -51,7 +48,6 @@ func doShorten(h http.Handler, url string) (shortenResponse, error) {
 	return resp, err
 }
 
-// shorten is doShorten that fails the test on error.
 func shorten(t *testing.T, h http.Handler, url string) shortenResponse {
 	t.Helper()
 	resp, err := doShorten(h, url)
@@ -152,7 +148,6 @@ func TestRedirectUnknownCode(t *testing.T) {
 	}
 }
 
-// failingStore makes every operation fail with a non-domain error.
 type failingStore struct{}
 
 var errDB = errors.New("database down")
@@ -175,9 +170,36 @@ func TestInternalErrorIs500(t *testing.T) {
 	}
 }
 
-// TestConcurrentShorten runs many parallel requests through the full HTTP
-// stack: duplicates of one URL must all get the same code, distinct URLs must
-// get distinct codes, and every code must redirect correctly. Use -race.
+func TestLookup(t *testing.T) {
+	h := newTestHandler()
+	resp := shorten(t, h, "https://go.dev/doc/")
+
+	rec := get(h, "/api/v1/links/"+resp.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var lr linkResponse
+	if err := json.NewDecoder(rec.Body).Decode(&lr); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if lr.URL != "https://go.dev/doc/" {
+		t.Errorf("url = %q, want https://go.dev/doc/", lr.URL)
+	}
+	if lr.CreatedAt == "" {
+		t.Error("created_at is empty")
+	}
+}
+
+func TestLookupNotFound(t *testing.T) {
+	h := newTestHandler()
+	rec := get(h, "/api/v1/links/sgZZZZZZ")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+// TestConcurrentShorten runs many parallel requests through the full HTTP stack.
 func TestConcurrentShorten(t *testing.T) {
 	h := newTestHandler()
 	const n = 50
