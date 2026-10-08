@@ -42,9 +42,9 @@
 
 | Done | Pts | Requirement |
 |:----:|:---:|-------------|
-| [ ] | 6 | Persistent `Store` (GORM+DB or file-backed) |
-| [ ] | 5 | Startup load |
-| [ ] | 5 | Create persisted before response |
-| [ ] | 4 | Restart test (temp DB or temp files) |
-| [ ] | 3 | Config selects memory vs persistent store |
-| [ ] | 2 | `-race` clean with persistent store |
+| [x] | 6 | Persistent `Store` (GORM+DB or file-backed) |
+| [x] | 5 | Startup load |
+| [x] | 5 | Create persisted before response |
+| [x] | 4 | Restart test (temp DB or temp files) |
+| [x] | 3 | Config selects memory vs persistent store |
+| [x] | 2 | `-race` clean with persistent store |

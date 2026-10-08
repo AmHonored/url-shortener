@@ -14,12 +14,14 @@ e.g. `sgaB3dE9`.
 
 ```bash
 go run ./cmd/server -addr :8080 -base http://localhost:8080
+go run ./cmd/server -store links.json   # persistent mode
 ```
 
-| Flag    | Default                 | Meaning                                   |
-|---------|-------------------------|-------------------------------------------|
-| `-addr` | `:8080`                 | Listen address                            |
-| `-base` | `http://localhost:8080` | Public base URL used to build `short_url` |
+| Flag     | Default                 | Meaning                                   |
+|----------|-------------------------|-------------------------------------------|
+| `-addr`  | `:8080`                 | Listen address                            |
+| `-base`  | `http://localhost:8080` | Public base URL used to build `short_url` |
+| `-store` | _(empty = in-memory)_   | Path to JSON file for persistent storage  |
 
 ## API
 
@@ -86,9 +88,10 @@ Redirect and lookup are read-only (`RLock`) and run in parallel. The `crypto/ran
 ## Project layout
 
 ```text
-cmd/server/            entrypoint: flags + wiring (kept thin)
+cmd/server/            entrypoint: flags + wiring
 internal/shortener/    domain: Link, errors, Normalize, NewCode, Service, Store interface
 internal/store/memory/ in-memory Store (maps + sync.RWMutex)
+internal/store/file/   JSON file-backed Store (persistent across restarts)
 internal/httpapi/      HTTP routes, JSON, error → status mapping
 ```
 

@@ -61,3 +61,16 @@ Defined in the domain package (`shortener.Store`) so storage depends on the doma
 ### Benchmarks
 `benchmark_test.go` covers idempotent shorten, distinct-URL shorten, redirect, and metadata lookup via `httptest`. These are end-to-end through the router so they measure realistic handler cost.
 
+## Part 4
+
+### File store
+`store/file` keeps the same two-map structure as the memory store but writes the full link set to a JSON file on every `Create`. The file is read once at startup (`load`) and rewritten atomically on each write (`save`). No external dependencies needed.
+
+### Persistence guarantee
+`save()` runs inside the write lock, before `Create` returns. If the write fails, the in-memory maps are rolled back, so the response is never sent for data that wasn't persisted.
+
+### Restart test
+`TestRestart` creates a store, writes a link, then opens a **new** `file.Store` from the same path and verifies the link survived.
+
+### Config
+`-store <path>` selects the file-backed store; omitting it keeps the default in-memory store.
