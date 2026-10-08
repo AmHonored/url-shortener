@@ -7,8 +7,10 @@
 coverage.out
 *.prof
 
-# Local databases (Part 4)
+# Local databases / store files (Part 4)
 *.db
+*.json
+FINAL-PROJECT.md
 
 # Editor / OS
 .vscode/

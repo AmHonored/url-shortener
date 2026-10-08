@@ -65,7 +65,7 @@ go test -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out | tail -n1
 ```
 
-Current coverage: `total: (statements) 85.9%`
+Current coverage: `total: (statements) 94.5%`
 
 ## Benchmarks
 
@@ -83,7 +83,6 @@ Sample output (i7-1065G7):
 | Lookup | ~13,100 | 6,285 | 22 |
 
 Redirect and lookup are read-only (`RLock`) and run in parallel. The `crypto/rand` call dominates shorten cost.
-
 
 ## Project layout
 

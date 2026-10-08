@@ -61,6 +61,9 @@ Defined in the domain package (`shortener.Store`) so storage depends on the doma
 ### Benchmarks
 `benchmark_test.go` covers idempotent shorten, distinct-URL shorten, redirect, and metadata lookup via `httptest`. These are end-to-end through the router so they measure realistic handler cost.
 
+### Eviction
+Not implemented. At this scale the in-memory map is small enough. Adding an LRU eviction would complicate the idempotency guarantee (a second POST after eviction would mint a new code for the same URL).
+
 ## Part 4
 
 ### File store
@@ -74,3 +77,9 @@ Defined in the domain package (`shortener.Store`) so storage depends on the doma
 
 ### Config
 `-store <path>` selects the file-backed store; omitting it keeps the default in-memory store.
+
+### How `created_at` is stored
+`Link.CreatedAt` is a `time.Time` field. JSON marshals it as an RFC 3339 string, so it round-trips through the file store without loss.
+
+### Idempotency after restart
+The `byURL` reverse index is rebuilt during `load()`, so the same URL returns the same code even after a restart.
