@@ -12,7 +12,7 @@ import (
 )
 
 func BenchmarkShorten(b *testing.B) {
-	h := New(shortener.NewService(memory.New()), testBase)
+	h := New(shortener.NewService(memory.New()), testBase, 0)
 	body := `{"url":"https://go.dev/doc/"}`
 
 	b.ResetTimer()
@@ -27,7 +27,7 @@ func BenchmarkShorten(b *testing.B) {
 }
 
 func BenchmarkShortenDistinct(b *testing.B) {
-	h := New(shortener.NewService(memory.New()), testBase)
+	h := New(shortener.NewService(memory.New()), testBase, 0)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -42,7 +42,7 @@ func BenchmarkShortenDistinct(b *testing.B) {
 }
 
 func BenchmarkRedirect(b *testing.B) {
-	h := New(shortener.NewService(memory.New()), testBase)
+	h := New(shortener.NewService(memory.New()), testBase, 0)
 	resp, _ := doShorten(h, "https://go.dev/doc/")
 	path := "/" + resp.Code
 
@@ -58,7 +58,7 @@ func BenchmarkRedirect(b *testing.B) {
 }
 
 func BenchmarkLookup(b *testing.B) {
-	h := New(shortener.NewService(memory.New()), testBase)
+	h := New(shortener.NewService(memory.New()), testBase, 0)
 	resp, _ := doShorten(h, "https://go.dev/doc/")
 	path := "/api/v1/links/" + resp.Code
 

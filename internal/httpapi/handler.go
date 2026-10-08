@@ -34,11 +34,16 @@ type errorResponse struct {
 type handler struct {
 	svc     *shortener.Service
 	baseURL string
+	limiter *RateLimiter
 }
 
 // New returns the HTTP handler with all routes registered.
-func New(svc *shortener.Service, baseURL string) http.Handler {
+// rateLimit is the max POST /api/shorten requests per IP per minute (0 = unlimited).
+func New(svc *shortener.Service, baseURL string, rateLimit int) http.Handler {
 	h := &handler{svc: svc, baseURL: strings.TrimRight(baseURL, "/")}
+	if rateLimit > 0 {
+		h.limiter = NewRateLimiter(rateLimit)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/shorten", h.shorten)
@@ -48,6 +53,11 @@ func New(svc *shortener.Service, baseURL string) http.Handler {
 }
 
 func (h *handler) shorten(w http.ResponseWriter, r *http.Request) {
+	if h.limiter != nil && !h.limiter.Allow(clientIP(r)) {
+		writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 
 	var req shortenRequest

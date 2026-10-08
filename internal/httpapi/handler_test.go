@@ -18,7 +18,7 @@ import (
 const testBase = "http://sho.rt"
 
 func newTestHandler() http.Handler {
-	return New(shortener.NewService(memory.New()), testBase)
+	return New(shortener.NewService(memory.New()), testBase, 0)
 }
 
 func post(t *testing.T, h http.Handler, body string) *httptest.ResponseRecorder {
@@ -90,7 +90,7 @@ func TestShortenSameURLSameCode(t *testing.T) {
 }
 
 func TestShortenBaseURLTrailingSlash(t *testing.T) {
-	h := New(shortener.NewService(memory.New()), testBase+"/")
+	h := New(shortener.NewService(memory.New()), testBase+"/", 0)
 	resp := shorten(t, h, "https://go.dev/")
 	if want := testBase + "/" + resp.Code; resp.ShortURL != want {
 		t.Errorf("short_url = %q, want %q", resp.ShortURL, want)
@@ -160,7 +160,7 @@ func (failingStore) Get(context.Context, string) (shortener.Link, error) {
 }
 
 func TestInternalErrorIs500(t *testing.T) {
-	h := New(shortener.NewService(failingStore{}), testBase)
+	h := New(shortener.NewService(failingStore{}), testBase, 0)
 
 	if rec := post(t, h, `{"url":"https://go.dev/"}`); rec.Code != http.StatusInternalServerError {
 		t.Errorf("POST: status = %d, want 500", rec.Code)
