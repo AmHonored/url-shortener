@@ -1,124 +1,116 @@
-# Design decisions
+# My Design Decisions
 
 ## Dependencies
-I didn't use any external dependencies. Everything is built with the Go standard library (using the new `net/http` routing from Go 1.22). Keeping it simple!
+I didn't use any external packages for this! The whole thing runs on the Go standard library, using `net/http` routing features from Go 1.22.
 
-## AI usage
-I built this project with the help of an AI coding assistant (Antigravity), but I directed the architecture and reviewed everything to make sure it meets the requirements.
+## AI Usage
+I used an AI assistant to help me write the code, but I made sure to drive the actual architecture and review everything to guarantee it hits all the project requirements.
 
 ## Part 1
 
-### Package layout
-I structured the project like this:
-- `cmd/server`: just flags and wiring up the server.
-- `internal/shortener`: the core domain stuff. It has the `Link` struct, my custom errors, the logic for generating codes, and the `Store` interface.
-- `internal/store/memory`: my in-memory storage implementation (uses two maps and a `sync.RWMutex`).
-- `internal/httpapi`: all the HTTP handlers, JSON encoding, and mapping my custom errors to HTTP status codes.
-
-The dependency flows from `httpapi` -> `shortener` <- `store/memory`. This keeps the core logic independent.
+### Package Layout
+I broke the project down into a few clear packages:
+- `cmd/server`: Just sets up the flags and starts the app.
+- `internal/shortener`: This is where the core logic lives (generating codes, checking URLs, and the Store interface).
+- `internal/store/memory`: The default in-memory storage using maps.
+- `internal/httpapi`: All the web stuff, like routing and JSON responses.
 
 ### Normalization
-To make sure we don't store the exact same link twice, I wrote a `Normalize` function. It lowercases the scheme and host, removes default ports (like 80 or 443), sets an empty path to `/`, and drops the fragment. I purposely kept the path case, query params, and trailing slashes intact because different websites treat those differently.
+To avoid storing duplicate links, my `Normalize` function removes default ports, drops fragments, and lowercases the domain. But I intentionally leave query parameters and path casing alone since different websites handle those differently.
 
 ### Validation
-I made sure it only accepts HTTP and HTTPS. It rejects empty hosts, long URLs (capped at 2048 chars), and URLs with credentials (`user:pass@`). Importantly, the server never actually fetches the URL so we are safe from SSRF attacks. Also, I don't echo back the bad URL in the error response just in case.
+The app only accepts HTTP/HTTPS links and completely blocks credentials (`user:pass@`). Also, to protect against SSRF, the server never actually tries to fetch the URL itself.
 
 ### Idempotency
-I used two maps in my store: `byCode` for fast redirects and `byURL` to act as a reverse index. When someone tries to `Create` a link, I check `byURL` first. If it's already there, I just return the existing code and throw away the newly generated one.
+I used two maps: one for quick redirects (`byCode`) and one to check if a URL was already shortened (`byURL`). If you try to shorten an existing URL, it just gives you the old code and throws the new one away.
 
-### Code generation
-For the short codes, I used `sg` plus 6 random base62 characters. I used `crypto/rand` for secure randomness, and I made sure to use rejection sampling so there's no modulo bias. Because it's random, people can't easily guess the next code, and I didn't need to mess with a shared counter.
+### Code Generation
+For the actual short code, it attaches `sg` to 6 random base62 characters. I used `crypto/rand` for security and rejection sampling to avoid modulo bias.
 
-### Collision handling
-62 chars to the power of 6 gives us about 56.8 billion combinations. If by some crazy chance we hit a collision (`ErrCodeExists`), my service will just retry generating a new code up to 5 times.
+### Collision Handling
+With 62 chars, we have over 56 billion possible codes. If we randomly generate a code that already exists, the service will just retry up to 5 times.
 
 ### Concurrency
-I went with a single `sync.RWMutex` to protect both maps. For redirects (`Get`), I just use an `RLock` so multiple people can get redirected at the same time. For creating links (`Create`), I use a full `Lock` so I can safely check if it exists and insert it in one atomic step.
+Everything is protected by a `sync.RWMutex`. Redirects use a read lock (`RLock`) so multiple people can use links at the same time without blocking each other.
 
-### HTTP
-I used the new Go 1.22 `ServeMux` patterns which makes routing super clean. I also capped request bodies at 1 MB so nobody can crash the server with massive payloads.
+### HTTP Setup
+I'm using the Go 1.22 `ServeMux` for routing. I also added a 1 MB limit to request bodies so nobody can spam huge payloads.
 
 ## Part 2
 
-### Metadata route
-I added `GET /api/v1/links/{code}` to return stats. It gives a 200 OK with `{"url":"...","created_at":"..."}` (using RFC 3339 time format) or a 404 if it doesn't exist. Under the hood, it reuses the same `Service.Resolve` method that the redirect handler uses.
+### Metadata Route
+I built `GET /api/v1/links/{code}` to return stats about a link. It reuses the same lookup logic as the redirect handler but returns JSON instead of a 302 redirect.
 
-### Error handling
-I created some sentinel errors in the domain package: `ErrNotFound`, `ErrInvalidURL`, and `ErrCodeExists`. When errors happen, I wrap them using `%w`, and then my HTTP layer checks for them using `errors.Is` to return the right status code (like 404 or 400).
+### Error Handling
+I created custom errors like `ErrNotFound` and `ErrInvalidURL`. By wrapping them with `%w`, my HTTP handlers can use `errors.Is` to figure out if it should return a 404, 400, or 409.
 
-### Store interface
-I put the `Store` interface right in the `shortener` package. This way, the storage depends on my domain rules, not the other way around. It also let me create a `fakeStore` for unit testing the service logic without dealing with real storage.
+### Store Interface
+The storage interface is defined inside the domain package. This made it easy for me to build a `fakeStore` to unit test my business logic without needing a real database.
 
 ## Part 3
 
-### Server timeouts
-I added some timeouts to the `http.Server` because `http.ListenAndServe` doesn't have any by default. I set `ReadTimeout` to 5s, `WriteTimeout` to 10s, and `IdleTimeout` to 120s. This protects against slow-client DoS attacks.
+### Server Timeouts
+To protect the app from slow-client attacks, I added timeouts to `http.Server` (5s for reads, 10s for writes). The default `http.ListenAndServe` doesn't have any timeouts.
 
-### Mutex choice
-I stuck with `sync.RWMutex`. In a URL shortener, redirects (reads) happen way more often than creating new links (writes). `RLock` lets all those reads happen in parallel. If I used a regular `Mutex`, it would bottleneck all the redirects behind each other.
+### Mutex Choice
+Because this is a URL shortener, 99% of the traffic is going to be redirects. That's why I went with `RWMutex` - it lets all those reads happen in parallel, whereas a standard `Mutex` would force every single redirect to wait in line.
 
 ### Benchmarks
-I wrote benchmarks in `benchmark_test.go` for shortening (both new and existing URLs), redirecting, and looking up metadata. I did them through `httptest` so it measures the actual HTTP handler overhead, giving a more realistic picture of performance.
+I added some HTTP benchmarks using `httptest` to see how fast the app really is when going through the full router, which is way more realistic than just testing the functions directly.
 
 ### Eviction
-I decided not to implement eviction. For the scale of this project, the in-memory map is fine. If I added an LRU cache, it would mess up my idempotency (if a URL gets evicted and someone shortens it again, they'd get a different code).
+I decided not to add an LRU cache or eviction policy. For an in-memory map, it's fine for this scale, and evicting items would break the idempotency rule if someone tried to shorten the same URL later.
 
 ## Part 4
 
-### File store
-I added `store/file` as my persistent storage option. It uses the exact same two-map logic, but every time `Create` is called, it marshals the whole dataset into JSON and writes it to a file. It reads this file once at startup (`load`). Still no external DB dependencies!
+### File Store
+I built a persistent JSON store! It works just like the memory store, but every time a new link is created, it saves the whole dataset to a file. No external databases required.
 
-### Persistence guarantee
-The `save()` function happens *inside* the write lock, right before `Create` finishes. If writing to the file fails for some reason, I delete the entry from the in-memory maps so the user never gets a success response for data that wasn't actually saved.
+### Persistence Guarantee
+I made sure the file save happens while the write lock is still active. If writing to the file fails, the app rolls back the in-memory maps so it never saves a link if it doesn't save it to the file.
 
-### Restart test
-I wrote `TestRestart` to prove this works. It makes a store, writes a link, and then creates a totally new `file.Store` pointing to the same temp file to make sure it loads the link back up.
+### Restart Test
+I wrote a `TestRestart` function that saves a link, creates a totally new store instance pointing to the same file, and proves that the link survived the restart.
 
 ### Config
-I added a `-store <path>` flag. If you provide a file path, it uses the file store. If you leave it empty, it defaults to the in-memory store.
+You can easily switch between the memory store and file store by passing a file path to the `-store` flag when running the app.
 
-### How `created_at` is stored
-The `CreatedAt` field is just a standard Go `time.Time`. Because I'm using JSON for the file store, it automatically marshals it into an RFC 3339 string, which parses perfectly back into `time.Time` when loaded.
+### Date Storage
+Because I used a standard `time.Time` for the creation date, Go's JSON package automatically converts it to a standard RFC 3339 string and parses it perfectly back into a time object when the server restarts.
 
-### Idempotency after restart
-Since the `byURL` reverse index is rebuilt from scratch during the `load()` phase at startup, idempotency works perfectly even after restarting the server.
+### Idempotency After Restart
+When the server boots up, it reads the JSON file and completely rebuilds the reverse-lookup map. This means idempotency works even if you turn the server off and on again.
 
 ## Part 5
 
-### Scaling out (Stateless apps + DB)
-Right now the app runs in one process. To scale it to millions, I'd put a load balancer (like nginx or AWS ALB) in front of multiple instances of my Go app. 
+### Stateless Apps & Database
+To scale this to millions of users, I'd put a load balancer in front of multiple copies of this Go app. To do that, the apps need to be stateless. I'd rip out the in-memory store and replace it with a shared **PostgreSQL** database, using unique indexes on the original URL and the short code for fast lookups.
 
-To make this work, the apps need to be stateless. I'd replace my in-memory/file store with a shared **PostgreSQL** database. I'd put a unique index on `original_url` to handle idempotency, and another unique index on `short_code` for fast redirects. Since they are indexed, lookups would be super fast O(log n) no matter how many app instances I run.
+### Redis & CDN
+If the read traffic increased significantly, I'd add **Redis** in front of Postgres to cache redirects. I'd also use a CDN (like Cloudflare) to cache the 302 redirects at the edge, meaning millions of clicks wouldn't even touch my servers.
 
-If read traffic gets insane, I'd throw **Redis** in front of Postgres. Redirect requests would hit Redis first. If the code isn't there, it checks Postgres, and then caches it in Redis with a TTL (like 24 hours). 
+### Handling Heavy Writes
+If the app gets spammed with shorten requests, I would:
+1. Keep the rate limiter I already built.
+2. Have a background worker generate random codes and store them in Redis so the app doesn't have to generate them on the fly.
+3. Put incoming requests into an async queue (like RabbitMQ) to process them in the background.
 
-### Edge caching
-For redirects, I'd return a `Cache-Control: public, max-age=3600` header and use a CDN like Cloudflare. The CDN caches the 302 redirect at the edge, meaning millions of users get redirected without my servers ever seeing the request. The downside is that if we ever wanted to delete a link, the CDN would still serve it for an hour, but for this project links are permanent so it's a great fit.
-
-### Write scaling
-If we get too many `POST /api/shorten` requests, here's what I'd do:
-1. **Rate limiting** (which I actually implemented!) to block spammy IPs.
-2. **Pre-generated codes**: Instead of generating random codes on the fly, a background worker could generate a bunch of codes and put them in a Redis list. The shorten handler would just `LPOP` a code instantly.
-3. **Async queues**: Return a `202 Accepted` immediately and put the URL in a queue (like RabbitMQ) to be processed in the background.
-
-### Bloom filter
-To protect the database from people guessing random codes, I could use a Bloom filter. It can tell us if a code *definitely does not exist* in O(1) time without hitting the DB. If it says it doesn't exist, I immediately return a 404. 
+### Bloom Filter
+To stop people from requesting non-existent codes, I'd add a Bloom filter. It can instantly tell if a code doesn't exist without ever accessing the database. If the code exists, it will forward the request to the database, otherwise it will return a 404 error. This will reduce the number of requests to the database and improve performance.
 
 ### Sharding
-If one Postgres instance gets too big, I could shard the database based on the first character of the short code (so 62 different shards). The Go app would look at the first letter and know exactly which DB to talk to.
+If Postgres gets too big, I'd partition it by the first letter of the short code (giving us 62 separate tables).
 
 ## Part 6
 
-### Graceful shutdown
-I added a `signal.Notify` to listen for `Ctrl-C` (SIGINT/SIGTERM). When it gets the signal, it calls `Server.Shutdown()` with a 10-second timeout. This stops accepting new requests but lets any currently running requests finish up before killing the app.
+### Graceful Shutdown
+I set up the app to listen for SIGINT and SIGTERM signals. When it gets the signal, it stops accepting new requests but gives any currently running requests 10 seconds to finish before actually closing.
 
-### Rate limiting
-I built a simple fixed-window rate limiter in `internal/httpapi/ratelimit.go`. It limits requests per IP address per minute (configurable with the `-rate` flag). If someone spams the shorten endpoint, they get a **429 Too Many Requests** error. The counters reset every 60 seconds.
+### Rate Limiting
+I built a fixed-window rate limiter that tracks requests per IP address every minute. If someone spams the server with requests, they get a 429 Too Many Requests error.
 
 ### Logging
-I just used the standard `log.Printf`. My rules are:
-- **Do log:** server starting/stopping, major internal errors (500s), and which store backend is selected.
-- **Don't log:** user-submitted URLs (they might have sensitive stuff in the query string) or `Location` headers.
+I kept logging clean and simple. I log server startup and 500 errors, but I specifically made sure not to log user URLs or redirect headers.
 
-### Load testing
-I wrote a quick script in `cmd/loadtest` to hammer the server with concurrent requests and measure requests per second (RPS). On my machine it hits about 9,200 RPS for shortening and 11,500 RPS for redirects!
+### Load Testing
+I wrote a custom `loadtest` tool to test the server. When I run it locally, I can hit about 9,200 req/s for shortening and over 11,000 req/s for redirects.
