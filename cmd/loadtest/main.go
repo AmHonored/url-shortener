@@ -1,11 +1,14 @@
 // Command loadtest hammers the shortener with concurrent requests and prints RPS.
 //
 //	go run ./cmd/loadtest -addr http://localhost:8080 -n 1000 -c 20
+//  Note: run the server with -rate 0 to prevent 429s from skewing the results
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
@@ -31,48 +34,50 @@ func main() {
 		return resp.StatusCode == http.StatusCreated
 	})
 
-	// Shorten once to get a code for redirect benchmarking.
+	// Shorten once to get a real code for redirect benchmarking.
 	resp, err := http.Post(*addr+"/api/shorten", "application/json",
 		strings.NewReader(`{"url":"https://go.dev/"}`))
 	if err != nil {
 		fmt.Println("could not shorten seed URL:", err)
 		return
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
+	
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	var result struct {
+		Code string `json:"code"`
+	}
+	json.Unmarshal(bodyBytes, &result)
 
-	// Extract code from Location header after a redirect request.
-	var code string
-	fmt.Sscanf(resp.Header.Get("Location"), *addr+"/%s", &code)
-
-	// Use the fixed seed code for redirect load.
-	seedURL := *addr + "/sgloadtest"
-	_ = seedURL
+	if result.Code == "" {
+		fmt.Println("could not extract short code from response")
+		return
+	}
 
 	runPhase("GET /{code} (redirect, hot code)", *n, *c, func() bool {
 		client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		}}
-		resp, err := client.Get(*addr + "/sg000001")
+		resp, err := client.Get(*addr + "/" + result.Code)
 		if err != nil {
 			return false
 		}
 		resp.Body.Close()
-		// 302 or 404 both mean the server responded.
-		return resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusNotFound
+		return resp.StatusCode == http.StatusFound
 	})
 }
 
 func runPhase(name string, n, c int, fn func() bool) {
 	var ok, fail int64
 	jobs := make(chan struct{}, n)
-	for range n {
+	for i := 0; i < n; i++ {
 		jobs <- struct{}{}
 	}
 	close(jobs)
 
 	var wg sync.WaitGroup
 	start := time.Now()
-	for range c {
+	for i := 0; i < c; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -88,6 +93,9 @@ func runPhase(name string, n, c int, fn func() bool) {
 	wg.Wait()
 	elapsed := time.Since(start)
 
-	rps := float64(n) / elapsed.Seconds()
+	rps := 0.0
+	if ok > 0 {
+		rps = float64(ok) / elapsed.Seconds()
+	}
 	fmt.Printf("%-45s  %6.0f req/s  ok=%-5d fail=%d\n", name, rps, ok, fail)
 }

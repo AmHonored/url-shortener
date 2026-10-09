@@ -99,7 +99,7 @@ If the app gets spammed with shorten requests, I would:
 To stop people from requesting non-existent codes, I'd add a Bloom filter. It can instantly tell if a code doesn't exist without ever accessing the database. If the code exists, it will forward the request to the database, otherwise it will return a 404 error. This will reduce the number of requests to the database and improve performance.
 
 ### Sharding
-If Postgres gets too big, I'd partition it by the first letter of the short code (giving us 62 separate tables).
+If Postgres gets too big, I'd partition it by the first random character of the short code (the character immediately following the `sg` prefix), giving us 62 separate tables.
 
 ## Part 6
 
