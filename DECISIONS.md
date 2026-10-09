@@ -1,142 +1,124 @@
 # Design decisions
 
 ## Dependencies
-
-None. Only the Go standard library is used (`net/http` routing from Go 1.22).
+I didn't use any external dependencies. Everything is built with the Go standard library (using the new `net/http` routing from Go 1.22). Keeping it simple!
 
 ## AI usage
-
-The code in this repository was written with an AI coding assistant
-(Antigravity), directed and reviewed by me.
+I built this project with the help of an AI coding assistant (Antigravity), but I directed the architecture and reviewed everything to make sure it meets the requirements.
 
 ## Part 1
 
 ### Package layout
-- `cmd/server`: flags and wiring only.
-- `internal/shortener`: domain — `Link`, sentinel errors, `Normalize`, `NewCode`, `Service`, `Store` interface.
-- `internal/store/memory`: in-memory `Store` (two maps + `sync.RWMutex`).
-- `internal/httpapi`: HTTP handlers, JSON encoding, error → status mapping.
-- Dependency direction: `httpapi → shortener ← store/memory`.
+I structured the project like this:
+- `cmd/server`: just flags and wiring up the server.
+- `internal/shortener`: the core domain stuff. It has the `Link` struct, my custom errors, the logic for generating codes, and the `Store` interface.
+- `internal/store/memory`: my in-memory storage implementation (uses two maps and a `sync.RWMutex`).
+- `internal/httpapi`: all the HTTP handlers, JSON encoding, and mapping my custom errors to HTTP status codes.
+
+The dependency flows from `httpapi` -> `shortener` <- `store/memory`. This keeps the core logic independent.
 
 ### Normalization
-`Normalize` builds a canonical string used as the identity key: lowercase scheme/host, strip default port, empty path → `/`, drop fragment. Path case, query, and trailing slashes are preserved because the target server may treat them differently.
+To make sure we don't store the exact same link twice, I wrote a `Normalize` function. It lowercases the scheme and host, removes default ports (like 80 or 443), sets an empty path to `/`, and drops the fragment. I purposely kept the path case, query params, and trailing slashes intact because different websites treat those differently.
 
 ### Validation
-HTTP(S) only, non-empty host, no credentials (`user:pass@`), max 2048 chars. URL is never fetched (no SSRF). Errors don't echo the URL.
+I made sure it only accepts HTTP and HTTPS. It rejects empty hosts, long URLs (capped at 2048 chars), and URLs with credentials (`user:pass@`). Importantly, the server never actually fetches the URL so we are safe from SSRF attacks. Also, I don't echo back the bad URL in the error response just in case.
 
 ### Idempotency
-Two maps: `byCode` (redirect path) and `byURL` (reverse index). `Create` returns the existing link if the URL is already stored; the generated code is discarded.
+I used two maps in my store: `byCode` for fast redirects and `byURL` to act as a reverse index. When someone tries to `Create` a link, I check `byURL` first. If it's already there, I just return the existing code and throw away the newly generated one.
 
 ### Code generation
-`sg` + 6 random base62 chars from `crypto/rand` with rejection sampling (no modulo bias). Random codes can't be enumerated and need no shared counter.
+For the short codes, I used `sg` plus 6 random base62 characters. I used `crypto/rand` for secure randomness, and I made sure to use rejection sampling so there's no modulo bias. Because it's random, people can't easily guess the next code, and I didn't need to mess with a shared counter.
 
 ### Collision handling
-62⁶ ≈ 56.8B codes. On `ErrCodeExists` the service retries up to 5 times.
+62 chars to the power of 6 gives us about 56.8 billion combinations. If by some crazy chance we hit a collision (`ErrCodeExists`), my service will just retry generating a new code up to 5 times.
 
 ### Concurrency
-One `sync.RWMutex` guards both maps. `Get` takes `RLock`; `Create` takes `Lock` for atomic check-and-insert.
+I went with a single `sync.RWMutex` to protect both maps. For redirects (`Get`), I just use an `RLock` so multiple people can get redirected at the same time. For creating links (`Create`), I use a full `Lock` so I can safely check if it exists and insert it in one atomic step.
 
 ### HTTP
-Go 1.22 `ServeMux` patterns. Request bodies capped at 1 MB. `-base` flag validated at startup.
+I used the new Go 1.22 `ServeMux` patterns which makes routing super clean. I also capped request bodies at 1 MB so nobody can crash the server with massive payloads.
 
 ## Part 2
 
 ### Metadata route
-`GET /api/v1/links/{code}` returns 200 with `{"url":"…","created_at":"…"}` (RFC 3339) or 404. Reuses the same `Service.Resolve` path as the redirect handler.
+I added `GET /api/v1/links/{code}` to return stats. It gives a 200 OK with `{"url":"...","created_at":"..."}` (using RFC 3339 time format) or a 404 if it doesn't exist. Under the hood, it reuses the same `Service.Resolve` method that the redirect handler uses.
 
 ### Error handling
-`ErrNotFound`, `ErrInvalidURL`, `ErrCodeExists` are sentinel errors in the domain package. All wrapping uses `%w`; the HTTP layer maps them with `errors.Is`.
+I created some sentinel errors in the domain package: `ErrNotFound`, `ErrInvalidURL`, and `ErrCodeExists`. When errors happen, I wrap them using `%w`, and then my HTTP layer checks for them using `errors.Is` to return the right status code (like 404 or 400).
 
 ### Store interface
-Defined in the domain package (`shortener.Store`) so storage depends on the domain, not the other way around. Tests use a `fakeStore` to verify service logic in isolation.
+I put the `Store` interface right in the `shortener` package. This way, the storage depends on my domain rules, not the other way around. It also let me create a `fakeStore` for unit testing the service logic without dealing with real storage.
 
 ## Part 3
 
 ### Server timeouts
-`http.Server` has `ReadTimeout` (5 s), `WriteTimeout` (10 s), and `IdleTimeout` (120 s) to prevent slow-client DoS. Bare `http.ListenAndServe` has none.
+I added some timeouts to the `http.Server` because `http.ListenAndServe` doesn't have any by default. I set `ReadTimeout` to 5s, `WriteTimeout` to 10s, and `IdleTimeout` to 120s. This protects against slow-client DoS attacks.
 
 ### Mutex choice
-`sync.RWMutex` — redirects (`Get`) are the hot path and only need `RLock`, so they run in parallel. `Create` needs exclusive `Lock` for the atomic check-and-insert. A plain `Mutex` would serialize all reads unnecessarily.
+I stuck with `sync.RWMutex`. In a URL shortener, redirects (reads) happen way more often than creating new links (writes). `RLock` lets all those reads happen in parallel. If I used a regular `Mutex`, it would bottleneck all the redirects behind each other.
 
 ### Benchmarks
-`benchmark_test.go` covers idempotent shorten, distinct-URL shorten, redirect, and metadata lookup via `httptest`. These are end-to-end through the router so they measure realistic handler cost.
+I wrote benchmarks in `benchmark_test.go` for shortening (both new and existing URLs), redirecting, and looking up metadata. I did them through `httptest` so it measures the actual HTTP handler overhead, giving a more realistic picture of performance.
 
 ### Eviction
-Not implemented. At this scale the in-memory map is small enough. Adding an LRU eviction would complicate the idempotency guarantee (a second POST after eviction would mint a new code for the same URL).
+I decided not to implement eviction. For the scale of this project, the in-memory map is fine. If I added an LRU cache, it would mess up my idempotency (if a URL gets evicted and someone shortens it again, they'd get a different code).
 
 ## Part 4
 
 ### File store
-`store/file` keeps the same two-map structure as the memory store but writes the full link set to a JSON file on every `Create`. The file is read once at startup (`load`) and rewritten atomically on each write (`save`). No external dependencies needed.
+I added `store/file` as my persistent storage option. It uses the exact same two-map logic, but every time `Create` is called, it marshals the whole dataset into JSON and writes it to a file. It reads this file once at startup (`load`). Still no external DB dependencies!
 
 ### Persistence guarantee
-`save()` runs inside the write lock, before `Create` returns. If the write fails, the in-memory maps are rolled back, so the response is never sent for data that wasn't persisted.
+The `save()` function happens *inside* the write lock, right before `Create` finishes. If writing to the file fails for some reason, I delete the entry from the in-memory maps so the user never gets a success response for data that wasn't actually saved.
 
 ### Restart test
-`TestRestart` creates a store, writes a link, then opens a **new** `file.Store` from the same path and verifies the link survived.
+I wrote `TestRestart` to prove this works. It makes a store, writes a link, and then creates a totally new `file.Store` pointing to the same temp file to make sure it loads the link back up.
 
 ### Config
-`-store <path>` selects the file-backed store; omitting it keeps the default in-memory store.
+I added a `-store <path>` flag. If you provide a file path, it uses the file store. If you leave it empty, it defaults to the in-memory store.
 
 ### How `created_at` is stored
-`Link.CreatedAt` is a `time.Time` field. JSON marshals it as an RFC 3339 string, so it round-trips through the file store without loss.
+The `CreatedAt` field is just a standard Go `time.Time`. Because I'm using JSON for the file store, it automatically marshals it into an RFC 3339 string, which parses perfectly back into `time.Time` when loaded.
 
 ### Idempotency after restart
-The `byURL` reverse index is rebuilt during `load()`, so the same URL returns the same code even after a restart.
+Since the `byURL` reverse index is rebuilt from scratch during the `load()` phase at startup, idempotency works perfectly even after restarting the server.
 
 ## Part 5
 
-### Stateless app — load balancer → N replicas → shared store
+### Scaling out (Stateless apps + DB)
+Right now the app runs in one process. To scale it to millions, I'd put a load balancer (like nginx or AWS ALB) in front of multiple instances of my Go app. 
 
-Each Go replica is stateless: it holds no per-request data. A load balancer (nginx, HAProxy, AWS ALB) distributes requests across N replicas by IP-hash or round-robin. Sticky sessions are not needed because every replica reads from the same shared store.
+To make this work, the apps need to be stateless. I'd replace my in-memory/file store with a shared **PostgreSQL** database. I'd put a unique index on `original_url` to handle idempotency, and another unique index on `short_code` for fast redirects. Since they are indexed, lookups would be super fast O(log n) no matter how many app instances I run.
 
-The shared store replaces the in-memory map and file store. The best choice at scale is **PostgreSQL** with a `(original_url)` unique index for idempotency and a `(short_code)` unique index for redirect lookups. Both paths become a single indexed lookup — O(log n) — regardless of how many replicas exist.
+If read traffic gets insane, I'd throw **Redis** in front of Postgres. Redirect requests would hit Redis first. If the code isn't there, it checks Postgres, and then caches it in Redis with a TTL (like 24 hours). 
 
-For extreme read throughput a **Redis** layer sits in front of Postgres: redirect reads (`GET /{code}`) check Redis first (`GET code`), falling back to Postgres on a miss, and then writing the result back to Redis with a TTL (e.g. 24 h). The write path (`POST /api/shorten`) always goes to Postgres first and then invalidates or pre-warms the Redis key.
+### Edge caching
+For redirects, I'd return a `Cache-Control: public, max-age=3600` header and use a CDN like Cloudflare. The CDN caches the 302 redirect at the edge, meaning millions of users get redirected without my servers ever seeing the request. The downside is that if we ever wanted to delete a link, the CDN would still serve it for an hour, but for this project links are permanent so it's a great fit.
 
-### CDN / edge caching for redirects
-
-`GET /{code}` responses carry `Cache-Control: public, max-age=3600`. A CDN (Cloudflare, CloudFront) caches the **302** response at the edge and serves millions of redirects without hitting the origin at all. Tradeoff: if a link is deleted or updated, the cached redirect stays stale until the TTL expires. For this use-case (links are immutable) that is acceptable.
-
-### Write-path scaling
-
-Three options ranked by complexity:
-1. **Rate limiting** (implemented) — reject abusive clients early; stops runaway traffic from a single IP.
-2. **Pre-generated code pool** — a background worker fills a Redis list with random codes. Shorten picks one atomically (`LPOP`), eliminating the `crypto/rand` call from the hot path and reducing per-request latency.
-3. **Async queue** — POST returns 202 Accepted immediately; a worker persists and indexes in the background. Tradeoff: the short URL is not immediately usable after the 202.
+### Write scaling
+If we get too many `POST /api/shorten` requests, here's what I'd do:
+1. **Rate limiting** (which I actually implemented!) to block spammy IPs.
+2. **Pre-generated codes**: Instead of generating random codes on the fly, a background worker could generate a bunch of codes and put them in a Redis list. The shorten handler would just `LPOP` a code instantly.
+3. **Async queues**: Return a `202 Accepted` immediately and put the URL in a queue (like RabbitMQ) to be processed in the background.
 
 ### Bloom filter
-
-A Bloom filter in front of the redirect store answers "does this code definitely not exist?" in O(1) with zero DB load. A negative answer (code definitely absent) returns 404 immediately. A positive answer (code may exist) does a normal DB lookup. False-positive rate is tunable by filter size. This is most valuable when the code space is large and many lookup requests are for codes that don't exist (e.g. typos, scanners).
+To protect the database from people guessing random codes, I could use a Bloom filter. It can tell us if a code *definitely does not exist* in O(1) time without hitting the DB. If it says it doesn't exist, I immediately return a 404. 
 
 ### Sharding
-
-When one Postgres instance cannot handle write throughput, shard by the first character of the code (62 shards possible). Each shard owns its own DB. The application layer routes by `code[0]`. Shard-local uniqueness is sufficient because `crypto/rand` codes are globally unique with overwhelming probability (62^6 ≈ 56 B codes across all shards).
+If one Postgres instance gets too big, I could shard the database based on the first character of the short code (so 62 different shards). The Go app would look at the first letter and know exactly which DB to talk to.
 
 ## Part 6
 
 ### Graceful shutdown
-
-`signal.Notify` listens for `SIGINT`/`SIGTERM`. On signal, `Server.Shutdown(ctx)` stops accepting new connections and waits up to **10 seconds** for in-flight requests to finish before returning. This means a rolling deploy or `Ctrl-C` never cuts a redirect mid-flight.
+I added a `signal.Notify` to listen for `Ctrl-C` (SIGINT/SIGTERM). When it gets the signal, it calls `Server.Shutdown()` with a 10-second timeout. This stops accepting new requests but lets any currently running requests finish up before killing the app.
 
 ### Rate limiting
-
-A fixed-window counter per IP per minute is implemented in `internal/httpapi/ratelimit.go`. The `-rate` flag (default 10) sets the limit; `0` disables it. When a client exceeds the limit the server returns **429 Too Many Requests** with a JSON error body. The window resets every 60 seconds.
-
-Tradeoffs: fixed windows allow a burst of 2× the limit across a window boundary. A sliding-window or token-bucket would be fairer but adds complexity. For this use-case (protecting the shorten endpoint) fixed-window is sufficient.
+I built a simple fixed-window rate limiter in `internal/httpapi/ratelimit.go`. It limits requests per IP address per minute (configurable with the `-rate` flag). If someone spams the shorten endpoint, they get a **429 Too Many Requests** error. The counters reset every 60 seconds.
 
 ### Logging
-
-`log.Printf` is used for structured-enough output without dependencies. The rules:
-- **Log:** server start/stop, internal errors (status 5xx), store selection.
-- **Never log:** submitted URLs (may contain query-string secrets), request bodies, `Location` headers (contain the long URL).
+I just used the standard `log.Printf`. My rules are:
+- **Do log:** server starting/stopping, major internal errors (500s), and which store backend is selected.
+- **Don't log:** user-submitted URLs (they might have sensitive stuff in the query string) or `Location` headers.
 
 ### Load testing
-
-`cmd/loadtest` runs concurrent shorten and redirect phases and prints req/s. Sample output on the development machine:
-
-```
-POST /api/shorten (same URL, idempotent)          ~9,200 req/s  ok=1000 fail=0
-GET /{code} (redirect, hot code)                  ~11,500 req/s ok=1000 fail=0
-```
-
+I wrote a quick script in `cmd/loadtest` to hammer the server with concurrent requests and measure requests per second (RPS). On my machine it hits about 9,200 RPS for shortening and 11,500 RPS for redirects!
