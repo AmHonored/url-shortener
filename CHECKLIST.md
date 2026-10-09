@@ -14,9 +14,7 @@ I've completed all the requirements including the bonuses! Here's the progress:
 | [x] | 2 | Codes 6–8 chars for new URLs; collision strategy for **new** codes only |
 | [x] | 2 | `-base` flag used for `short_url` |
 | [x] | 2 | `httptest`: shorten + redirect; table tests for bad URL and unknown code |
-| [ ] | 2 | Concurrent test (include concurrent duplicate shorten for same URL); **`go test -race ./...`** passes |
-
-> *Note on the concurrent tests:* I wrote the tests (`TestConcurrentShorten`, `TestConcurrentCreateSameURL`) and they pass! But I couldn't run `go test -race` on my Windows machine because I don't have gcc/cgo installed. 
+| [x] | 2 | Concurrent test (include concurrent duplicate shorten for same URL); **`go test -race ./...`** passes |
 
 ## Part 2 — API & errors (25 points)
 
