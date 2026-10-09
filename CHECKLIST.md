@@ -48,3 +48,23 @@
 | [x] | 4 | Restart test (temp DB or temp files) |
 | [x] | 3 | Config selects memory vs persistent store |
 | [x] | 2 | `-race` clean with persistent store |
+
+## Part 5 — Scale to millions (bonus, +10 max)
+
+| Done | Pts | Requirement |
+|:----:|:---:|-------------|
+| [x] | 4 | `DECISIONS.md`: LB → N apps → shared store (Postgres + Redis) |
+| [x] | 3 | CDN / edge caching for redirects |
+| [x] | 3 | Write-path scaling (rate limit implemented; code pool + queue described) |
+| [x] | 3 | Sharding / partitioning strategy |
+| [x] | 4 | Bonus code: `cmd/loadtest` — concurrent load-test script with RPS output |
+
+## Part 6 — Production habits (bonus, +10 max)
+
+| Done | Pts | Requirement |
+|:----:|:---:|-------------|
+| [x] | 3 | Graceful shutdown (`signal.Notify` + `Server.Shutdown` with 10 s drain) |
+| [x] | 3 | Rate limit on `POST /api/shorten` (fixed-window per IP, `-rate` flag) |
+| [x] | 2 | Domain policy in `DECISIONS.md` (what to log vs never log) |
+| [x] | 2 | What you log vs never log documented |
+

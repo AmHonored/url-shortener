@@ -22,6 +22,9 @@ go run ./cmd/server -store links.json   # persistent mode
 | `-addr`  | `:8080`                 | Listen address                            |
 | `-base`  | `http://localhost:8080` | Public base URL used to build `short_url` |
 | `-store` | _(empty = in-memory)_   | Path to JSON file for persistent storage  |
+| `-rate`  | `10`                    | Max `POST /api/shorten` requests per IP per minute (0 = unlimited) |
+
+The server shuts down gracefully on `SIGINT`/`SIGTERM` (10 s drain).
 
 ## API
 
@@ -87,11 +90,12 @@ Redirect and lookup are read-only (`RLock`) and run in parallel. The `crypto/ran
 ## Project layout
 
 ```text
-cmd/server/            entrypoint: flags + wiring
+cmd/server/            entrypoint: flags, wiring, graceful shutdown
+cmd/loadtest/          concurrent load-test tool (prints req/s)
 internal/shortener/    domain: Link, errors, Normalize, NewCode, Service, Store interface
 internal/store/memory/ in-memory Store (maps + sync.RWMutex)
 internal/store/file/   JSON file-backed Store (persistent across restarts)
-internal/httpapi/      HTTP routes, JSON, error → status mapping
+internal/httpapi/      HTTP routes, JSON, error mapping, rate limiter
 ```
 
 See [DECISIONS.md](DECISIONS.md) for design choices and

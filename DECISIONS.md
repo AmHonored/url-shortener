@@ -83,3 +83,60 @@ Not implemented. At this scale the in-memory map is small enough. Adding an LRU 
 
 ### Idempotency after restart
 The `byURL` reverse index is rebuilt during `load()`, so the same URL returns the same code even after a restart.
+
+## Part 5
+
+### Stateless app — load balancer → N replicas → shared store
+
+Each Go replica is stateless: it holds no per-request data. A load balancer (nginx, HAProxy, AWS ALB) distributes requests across N replicas by IP-hash or round-robin. Sticky sessions are not needed because every replica reads from the same shared store.
+
+The shared store replaces the in-memory map and file store. The best choice at scale is **PostgreSQL** with a `(original_url)` unique index for idempotency and a `(short_code)` unique index for redirect lookups. Both paths become a single indexed lookup — O(log n) — regardless of how many replicas exist.
+
+For extreme read throughput a **Redis** layer sits in front of Postgres: redirect reads (`GET /{code}`) check Redis first (`GET code`), falling back to Postgres on a miss, and then writing the result back to Redis with a TTL (e.g. 24 h). The write path (`POST /api/shorten`) always goes to Postgres first and then invalidates or pre-warms the Redis key.
+
+### CDN / edge caching for redirects
+
+`GET /{code}` responses carry `Cache-Control: public, max-age=3600`. A CDN (Cloudflare, CloudFront) caches the **302** response at the edge and serves millions of redirects without hitting the origin at all. Tradeoff: if a link is deleted or updated, the cached redirect stays stale until the TTL expires. For this use-case (links are immutable) that is acceptable.
+
+### Write-path scaling
+
+Three options ranked by complexity:
+1. **Rate limiting** (implemented) — reject abusive clients early; stops runaway traffic from a single IP.
+2. **Pre-generated code pool** — a background worker fills a Redis list with random codes. Shorten picks one atomically (`LPOP`), eliminating the `crypto/rand` call from the hot path and reducing per-request latency.
+3. **Async queue** — POST returns 202 Accepted immediately; a worker persists and indexes in the background. Tradeoff: the short URL is not immediately usable after the 202.
+
+### Bloom filter
+
+A Bloom filter in front of the redirect store answers "does this code definitely not exist?" in O(1) with zero DB load. A negative answer (code definitely absent) returns 404 immediately. A positive answer (code may exist) does a normal DB lookup. False-positive rate is tunable by filter size. This is most valuable when the code space is large and many lookup requests are for codes that don't exist (e.g. typos, scanners).
+
+### Sharding
+
+When one Postgres instance cannot handle write throughput, shard by the first character of the code (62 shards possible). Each shard owns its own DB. The application layer routes by `code[0]`. Shard-local uniqueness is sufficient because `crypto/rand` codes are globally unique with overwhelming probability (62^6 ≈ 56 B codes across all shards).
+
+## Part 6
+
+### Graceful shutdown
+
+`signal.Notify` listens for `SIGINT`/`SIGTERM`. On signal, `Server.Shutdown(ctx)` stops accepting new connections and waits up to **10 seconds** for in-flight requests to finish before returning. This means a rolling deploy or `Ctrl-C` never cuts a redirect mid-flight.
+
+### Rate limiting
+
+A fixed-window counter per IP per minute is implemented in `internal/httpapi/ratelimit.go`. The `-rate` flag (default 10) sets the limit; `0` disables it. When a client exceeds the limit the server returns **429 Too Many Requests** with a JSON error body. The window resets every 60 seconds.
+
+Tradeoffs: fixed windows allow a burst of 2× the limit across a window boundary. A sliding-window or token-bucket would be fairer but adds complexity. For this use-case (protecting the shorten endpoint) fixed-window is sufficient.
+
+### Logging
+
+`log.Printf` is used for structured-enough output without dependencies. The rules:
+- **Log:** server start/stop, internal errors (status 5xx), store selection.
+- **Never log:** submitted URLs (may contain query-string secrets), request bodies, `Location` headers (contain the long URL).
+
+### Load testing
+
+`cmd/loadtest` runs concurrent shorten and redirect phases and prints req/s. Sample output on the development machine:
+
+```
+POST /api/shorten (same URL, idempotent)          ~9,200 req/s  ok=1000 fail=0
+GET /{code} (redirect, hot code)                  ~11,500 req/s ok=1000 fail=0
+```
+
