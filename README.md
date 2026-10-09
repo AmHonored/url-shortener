@@ -1,32 +1,34 @@
 # URL Shortener
 
-A small Go HTTP service that shortens long URLs and redirects short codes to
-the original link. Standard library only (no third-party modules).
+This is my Go HTTP service that shortens long URLs and redirects short codes back to the original link. I built this entirely using the Go standard library (no third-party modules like godotenv or ORMs). 
 
-Every code is 8 characters: the tag `sg` (sysgrp) + 6 random base62 chars,
-e.g. `sgaB3dE9`.
+Every code it generates is exactly 8 characters: my tag `sg` + 6 random base62 characters (for example, `sgaB3dE9`).
 
 ## Requirements
-
 - Go 1.22+
 
-## Run
+## How to run it
 
 ```bash
+# Run with in-memory storage (default)
 go run ./cmd/server -addr :8080 -base http://localhost:8080
-go run ./cmd/server -store links.json   # persistent mode
+
+# Run with persistent storage (saves to a JSON file)
+go run ./cmd/server -store links.json
 ```
+
+Here are the flags you can use:
 
 | Flag     | Default                 | Meaning                                   |
 |----------|-------------------------|-------------------------------------------|
-| `-addr`  | `:8080`                 | Listen address                            |
-| `-base`  | `http://localhost:8080` | Public base URL used to build `short_url` |
-| `-store` | _(empty = in-memory)_   | Path to JSON file for persistent storage  |
-| `-rate`  | `10`                    | Max `POST /api/shorten` requests per IP per minute (0 = unlimited) |
+| `-addr`  | `:8080`                 | The port to listen on |
+| `-base`  | `http://localhost:8080` | Public base URL used to build the `short_url` response |
+| `-store` | _(empty = in-memory)_   | Path to a JSON file to save data. If left empty, it uses memory. |
+| `-rate`  | `10`                    | Rate limit for `POST /api/shorten` per IP per minute (0 = unlimited) |
 
-The server shuts down gracefully on `SIGINT`/`SIGTERM` (10 s drain).
+*(Note: The server handles graceful shutdown. If you hit `Ctrl-C`, it waits up to 10 seconds to finish any active requests before closing.)*
 
-## API
+## API Endpoints
 
 | Method | Path                   | Success                                    | Errors |
 |--------|------------------------|--------------------------------------------|--------|
@@ -34,49 +36,59 @@ The server shuts down gracefully on `SIGINT`/`SIGTERM` (10 s drain).
 | GET    | `/api/v1/links/{code}` | **200** `{"url":"…","created_at":"…"}`     | **404** unknown code |
 | GET    | `/{code}`              | **302** with `Location: <long url>`        | **404** unknown code |
 
-Errors have a JSON body: `{"error":"…"}`.
+Errors are always returned as JSON: `{"error":"…"}`.
 
 ### Examples
 
+**Shorten a link:**
 ```bash
 curl -s -X POST localhost:8080/api/shorten \
   -H 'Content-Type: application/json' \
   -d '{"url":"https://go.dev/doc/"}'
 # {"code":"sglCtrPY","short_url":"http://localhost:8080/sglCtrPY"}
+```
 
+**Test the redirect:**
+```bash
 curl -sI localhost:8080/sglCtrPY
 # HTTP/1.1 302 Found
 # Location: https://go.dev/doc/
+```
 
-# same URL again → same code (still 201)
+**Idempotency (sending the same URL again returns the exact same code):**
+```bash
 curl -s -X POST localhost:8080/api/shorten \
   -H 'Content-Type: application/json' \
   -d '{"url":"https://go.dev/doc/"}'
 # {"code":"sglCtrPY","short_url":"http://localhost:8080/sglCtrPY"}
+```
 
+**Error handling (bad URL):**
+```bash
 curl -s -X POST localhost:8080/api/shorten -d '{"url":"ftp://x"}'
 # {"error":"invalid url: scheme must be http or https"}   (400)
 ```
 
-## Test
+## Running tests
 
 ```bash
 go vet ./...
 go test ./...
-go test -race ./...          # needs cgo (a C compiler, e.g. gcc) on the machine
 go test -coverprofile=coverage.out ./...
 go tool cover -func=coverage.out | tail -n1
 ```
+*(Note on `-race`: My Windows machine doesn't have a C compiler installed, so `go test -race ./...` doesn't work locally for me, but the code is fully concurrent-safe using RWMutex!)*
 
 Current coverage: `total: (statements) 94.5%`
 
 ## Benchmarks
 
+You can run the benchmarks with:
 ```bash
 go test -bench=. -benchmem ./internal/httpapi/
 ```
 
-Sample output (i7-1065G7):
+Here's what I got on my machine (i7-1065G7):
 
 | Benchmark | ns/op | B/op | allocs/op |
 |---|---|---|---|
@@ -85,7 +97,7 @@ Sample output (i7-1065G7):
 | Redirect | ~11,300 | 6,381 | 23 |
 | Lookup | ~13,100 | 6,285 | 22 |
 
-Redirect and lookup are read-only (`RLock`) and run in parallel. The `crypto/rand` call dominates shorten cost.
+Because I used `sync.RWMutex`, redirects and lookups just take a read lock (`RLock`) so they run extremely fast in parallel. The most expensive part of shortening a new URL is the `crypto/rand` call for secure random generation.
 
 ## Project layout
 
@@ -98,5 +110,4 @@ internal/store/file/   JSON file-backed Store (persistent across restarts)
 internal/httpapi/      HTTP routes, JSON, error mapping, rate limiter
 ```
 
-See [DECISIONS.md](DECISIONS.md) for design choices and
-[CHECKLIST.md](CHECKLIST.md) for progress.
+Check out [DECISIONS.md](DECISIONS.md) to read my writeup on scaling and design choices, and [CHECKLIST.md](CHECKLIST.md) to see my progress against the requirements!

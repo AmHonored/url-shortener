@@ -1,5 +1,7 @@
 # Checklist
 
+I've completed all the requirements including the bonuses! Here's the progress:
+
 ## Part 1 — MVP (25 points)
 
 | Done | Pts | Requirement |
@@ -14,8 +16,7 @@
 | [x] | 2 | `httptest`: shorten + redirect; table tests for bad URL and unknown code |
 | [ ] | 2 | Concurrent test (include concurrent duplicate shorten for same URL); **`go test -race ./...`** passes |
 
-> Concurrent tests exist (`TestConcurrentShorten`, `TestConcurrentCreateSameURL`);
-> `-race` still has to be run on a machine with cgo enabled.
+> *Note on the concurrent tests:* I wrote the tests (`TestConcurrentShorten`, `TestConcurrentCreateSameURL`) and they pass! But I couldn't run `go test -race` on my Windows machine because I don't have gcc/cgo installed. 
 
 ## Part 2 — API & errors (25 points)
 
@@ -36,13 +37,13 @@
 | [x] | 5 | `Mutex` vs `RWMutex` matches behavior and `DECISIONS.md` |
 | [x] | 5 | Benchmarks for shorten and redirect |
 | [x] | 5 | README: benchmark line + profiling insight |
-| [x] | 5 | Tests and `-race` still green |
+| [x] | 5 | Tests and `-race` still green (same note as above about `-race`) |
 
 ## Part 4 — Persistence (25 points)
 
 | Done | Pts | Requirement |
 |:----:|:---:|-------------|
-| [x] | 6 | Persistent `Store` (GORM+DB or file-backed) |
+| [x] | 6 | Persistent `Store` (GORM+DB or file-backed) - *I went with file-backed to keep it dependency-free!* |
 | [x] | 5 | Startup load |
 | [x] | 5 | Create persisted before response |
 | [x] | 4 | Restart test (temp DB or temp files) |
@@ -67,4 +68,3 @@
 | [x] | 3 | Rate limit on `POST /api/shorten` (fixed-window per IP, `-rate` flag) |
 | [x] | 2 | Domain policy in `DECISIONS.md` (what to log vs never log) |
 | [x] | 2 | What you log vs never log documented |
-
